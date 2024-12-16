@@ -48,59 +48,50 @@ func YenKShortestPaths(g graph.Graph, k int, cost float64, s, t graph.Node) [][]
 	spurIndex := 0
 	var pot []yenShortest
 	var root []graph.Node
-	for i := int64(1); k < 0 || i < int64(k); i++ {
+	var matchingPaths [][]graph.Node
+	for i := 1; k < 0 || i < k; i++ {
+		yk.reset()
+		matchingPaths = append(matchingPaths[:0], paths...)
+		prevPath := paths[i-1]
+		root = append(root[:0], prevPath[:spurIndex]...)
+		var rootWeight float64
 		// The spur node ranges from the previous spur node to the next
 		// to last node in the previous k-shortest path.
-		for n := spurIndex; n < len(paths[i-1])-1; n++ {
-			yk.reset()
+		for n := spurIndex; n < len(prevPath)-1; n++ {
+			spur := prevPath[n]
+			root = append(root, spur)
 
-			spur := paths[i-1][n]
-			root := append(root[:0], paths[i-1][:n+1]...)
-
-			for _, path := range paths {
-				if len(path) <= n {
-					continue
-				}
-				ok := true
-				for x := 0; x < len(root); x++ {
-					if path[x].ID() != root[x].ID() {
-						ok = false
-						break
-					}
-				}
-				if ok {
-					yk.removeEdge(path[n].ID(), path[n+1].ID())
-				}
+			if n > 0 {
+				w, _ := yk.weight(root[n-1].ID(), spur.ID())
+				rootWeight += w
+				yk.removeNode(root[n-1].ID())
 			}
-			for _, u := range root[:len(root)-1] {
-				yk.removeNode(u.ID())
+
+			// Remove paths that deviate from the current root path
+			matchingPaths = slices.DeleteFunc(matchingPaths, func(path []graph.Node) bool {
+				return len(path) <= n || path[n].ID() != spur.ID()
+			})
+			for _, path := range matchingPaths {
+				yk.removeEdge(path[n].ID(), path[n+1].ID())
 			}
 
 			spath, weight := DijkstraFromTo(spur, t, yk)
+			weight += rootWeight
 			if weight > cost || math.IsInf(weight, 1) {
 				continue
 			}
-			if len(root) > 1 {
-				var rootWeight float64
-				for x := 1; x < len(root); x++ {
-					w, _ := yk.weight(root[x-1].ID(), root[x].ID())
-					rootWeight += w
-				}
-				spath = append(root[:len(root)-1], spath...)
-				weight += rootWeight
+			if n > 0 {
+				spath = append(root[:n], spath...)
 			}
 
 			// Add the potential k-shortest path if it is new.
-			isNewPot := true
 			for x := range pot {
 				if isSamePath(pot[x].path, spath) {
-					isNewPot = false
-					break
+					goto notnew
 				}
 			}
-			if isNewPot {
-				pot = append(pot, yenShortest{spath, weight, n})
-			}
+			pot = append(pot, yenShortest{slices.Clone(spath), weight, n})
+		notnew:
 		}
 
 		if len(pot) == 0 {
@@ -111,7 +102,7 @@ func YenKShortestPaths(g graph.Graph, k int, cost float64, s, t graph.Node) [][]
 			return cmp.Compare(a.weight, b.weight)
 		})
 		best := pot[0]
-		if len(best.path) <= 1 || best.weight > cost {
+		if len(best.path) <= 1 {
 			break
 		}
 		if neededPaths := k - int(i); k >= 0 && len(pot) >= neededPaths && best.weight == pot[neededPaths-1].weight {
